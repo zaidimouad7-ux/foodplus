@@ -1,298 +1,184 @@
 "use client";
-import { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 
-// CONNEXION DIRECTE À SUPABASE
-const supabaseUrl = "https://kzubxrbuuiersdxwmoyj.supabase.co";
-const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6dWJ4cmJ1dWllcnNkeHdtb3lqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMjc4MDAsImV4cCI6MjA5NzgwMzgwMH0.BImuZKbk-p77HMqHmChndnK1SPslpcfNJBqYa5AWFYg";
+import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+import Image from "next/image";
+
+// Connexion à Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export default function MenuRestaurant() {
-  const [restaurant, setRestaurant] = useState<any>(null);
+export default function MenuPage() {
   const [produits, setProduits] = useState<any[]>([]);
-  const [panier, setPanier] = useState<any[]>([]);
-  const [chargement, setChargement] = useState<boolean>(true);
+  const [chargement, setChargement] = useState(true);
   
-  // 💡 NOUVEAU : Un état pour afficher l'erreur sur le téléphone
-  const [erreurMobile, setErreurMobile] = useState<string | null>(null);
-
-  // États pour le formulaire de livraison
-  const [nomClient, setNomClient] = useState("");
+  // --- NOUVEAUX ÉTATS POUR LE PANIER ---
+  const [panier, setPanier] = useState<any[]>([]);
+  const [afficherPanier, setAfficherPanier] = useState(false);
+  
+  // États pour le formulaire client
+  const [nom, setNom] = useState("");
   const [telephone, setTelephone] = useState("");
   const [adresse, setAdresse] = useState("");
-  const [notesClient, setNotesClient] = useState("");
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
-  const [commandeValidee, setCommandeValidee] = useState(false);
 
   useEffect(() => {
-    // Sécurité : On arrête de chercher au bout de 10 secondes
-    const timeout = setTimeout(() => {
-      setErreurMobile("Le réseau de ce téléphone bloque la connexion à la base de données (Délai dépassé).");
-      setChargement(false);
-    }, 10000);
-
-    async function chargerDonnees() {
-      try {
-        const { data: restoData, error: restoError } = await supabase
-          .from('restaurants')
-          .select('*')
-          .limit(1)
-          .single();
-
-        if (restoError) throw restoError;
-        setRestaurant(restoData);
-
-        if (restoData) {
-          const { data: produitsData, error: produitsError } = await supabase
-            .from('produits')
-            .select('*')
-            .eq('restaurant_id', restoData.id)
-            .eq('disponible', true);
-
-          if (produitsError) throw produitsError;
-          setProduits(produitsData || []);
-        }
-      } catch (error: any) { 
-        console.error("Erreur :", error.message);
-        setErreurMobile(error.message); // On capture l'erreur ici !
-      } finally {
-        clearTimeout(timeout); // On annule le chrono si ça a marché
-        setChargement(false);
-      }
-    }
-
-    chargerDonnees();
+    fetchProduits();
   }, []);
 
-  // ... (Garde tes fonctions ajouterAuPanier et soumettreCommande telles quelles ici) ...
+  async function fetchProduits() {
+    const { data, error } = await supabase.from("produits").select("*");
+    if (!error) setProduits(data || []);
+    setChargement(false);
+  }
+
+  // --- FONCTION POUR AJOUTER AU PANIER ---
   const ajouterAuPanier = (produit: any) => {
-    setPanier((panierActuel) => {
-      const existe = panierActuel.find((item) => item.id === produit.id);
-      if (existe) {
-        return panierActuel.map((item) =>
-          item.id === produit.id ? { ...item, quantite: item.quantite + 1 } : item
-        );
-      }
-      return [...panierActuel, { ...produit, quantite: 1 }];
-    });
-    setCommandeValidee(false);
+    setPanier([...panier, produit]);
+    alert(`✅ ${produit.titre} a été ajouté au panier !`);
   };
 
-  const totalPanier = panier.reduce((total, item) => total + item.prix * item.quantite, 0);
+  // Calcul du total
+  const totalPanier = panier.reduce((total, item) => total + item.prix, 0);
 
-  const soumettreCommande = async () => {
-    if (!nomClient || !telephone || !adresse) {
-      alert("Veuillez remplir toutes vos informations de livraison 🛵");
-      return;
-    }
-
+  // --- FONCTION POUR ENVOYER LA COMMANDE À SUPABASE ---
+  const validerCommande = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (panier.length === 0) return alert("Votre panier est vide !");
+    
     setEnvoiEnCours(true);
-    const resumeCommande = panier.map(item => `${item.quantite}x ${item.nom}`).join(' | ');
+
+    // Création du texte des détails (ex: "1x Burger, 1x Frites")
+    const details = panier.map(p => p.titre).join(", ");
 
     try {
-      const { error } = await supabase
-        .from('commandes')
-        .insert([
-          {
-            nom_client: nomClient,
-            telephone_client: telephone,
-            adresse_livraison: adresse,
-            total: totalPanier,
-            statut: 'En attente',
-            details: resumeCommande,
-            notes_client: notesClient
-          }
-        ]);
+      const { error } = await supabase.from("commandes").insert([
+        {
+          nom_client: nom,
+          telephone_client: telephone,
+          adresse_livraison: adresse,
+          total: totalPanier,
+          details_commande: details,
+          statut: "en attente" // Par défaut
+        }
+      ]);
 
       if (error) throw error;
 
+      alert("🎉 Commande envoyée avec succès !");
+      // On vide le panier et on ferme la fenêtre
       setPanier([]);
-      setNomClient("");
-      setTelephone("");
-      setAdresse("");
-      setNotesClient("");
-      setCommandeValidee(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setAfficherPanier(false);
+      setNom(""); setTelephone(""); setAdresse("");
 
     } catch (error: any) {
-      alert("Une erreur est survenue lors de la commande.");
+      alert("❌ Erreur lors de la commande : " + error.message);
     } finally {
       setEnvoiEnCours(false);
     }
   };
 
-  // 💡 NOUVEAU : Affichage de l'erreur
-  if (erreurMobile) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
-        <p className="text-4xl mb-4">⚠️</p>
-        <p className="text-xl text-red-600 font-bold mb-2">Erreur de connexion</p>
-        <p className="text-gray-700 bg-gray-200 p-4 rounded-xl">{erreurMobile}</p>
-        <p className="text-sm text-gray-500 mt-6">Prends une photo de cet écran !</p>
-      </div>
-    );
-  }
-
-  if (chargement) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-yellow-400">
-        <div className="text-7xl animate-bounce drop-shadow-lg">🛵</div>
-        <p className="mt-6 text-white font-black text-3xl uppercase tracking-tighter drop-shadow-md">Le four chauffe...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-[#FFFDF8] font-sans text-gray-900 selection:bg-[#0f4d22] selection:text-white pb-24">
+    <div className="min-h-screen bg-black text-white p-6 font-sans relative">
       
-      <header className="bg-linear-to-br from-orange-500 via-orange-400 to-yellow-400 py-12 px-4 shadow-2xl text-center relative overflow-hidden border-b-8 border-yellow-300 flex flex-col items-center">
-        <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none flex flex-wrap gap-12 text-5xl items-center justify-center -rotate-12 scale-150">
-           🍕 🛵 🥤 🍕 🛵 🥤 🍕 🛵 🥤
-        </div>
-        
-        <div className="relative z-10 flex flex-col items-center">
-          <img 
-            src="/logo.jpg" 
-            alt="Logo du Fast Food" 
-            className="w-56 h-56 md:w-64 md:h-64 object-cover rounded-full shadow-[0_15px_35px_rgba(0,0,0,0.4)] border-4 border-white mb-6 hover:scale-105 transition-transform duration-500"
-          />
-          <h1 className="text-5xl md:text-7xl font-black text-white italic tracking-tighter drop-shadow-[0_5px_5px_rgba(0,0,0,0.3)] mb-4 uppercase">
-            {restaurant.nom}
-          </h1>
-          <p className="text-white font-black text-lg md:text-xl bg-[#0f4d22] inline-block px-8 py-3 rounded-full uppercase tracking-widest border-2 border-[#1a6e34] shadow-lg">
-            🔥 Chaud, Rapide & Délicieux 🔥
-          </p>
-        </div>
-      </header>
+      {/* Bouton Panier Flottant (s'affiche si le panier n'est pas vide) */}
+      {panier.length > 0 && (
+        <button 
+          onClick={() => setAfficherPanier(true)}
+          className="fixed bottom-8 right-8 bg-red-600 hover:bg-red-700 text-white p-4 rounded-full shadow-2xl z-50 flex items-center font-bold text-lg animate-bounce"
+        >
+          🛒 Voir Panier ({panier.length}) - {totalPanier} DA
+        </button>
+      )}
 
-      <main className="max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8 -mt-6 relative z-20">
-        
-        <div className="lg:col-span-2">
-          {commandeValidee && (
-            <div className="bg-linear-to-r from-yellow-400 to-[#0f4d22] border-4 border-white text-white p-6 rounded-[30px] mb-8 shadow-2xl flex items-center gap-4 animate-bounce">
-              <span className="text-5xl">🛵</span>
-              <div>
-                <p className="text-2xl font-black uppercase italic tracking-tighter">C'est dans la boîte !</p>
-                <p className="font-bold text-sm">Votre commande a été envoyée et est en cours de préparation.</p>
-              </div>
+      {/* --- FENÊTRE DU PANIER (MODAL) --- */}
+      {afficherPanier && (
+        <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-50 p-4">
+          <div className="bg-zinc-900 border border-red-600 rounded-2xl w-full max-w-lg p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold uppercase">Votre Commande</h2>
+              <button onClick={() => setAfficherPanier(false)} className="text-red-500 font-bold text-xl">X</button>
             </div>
-          )}
 
-          {produits.length === 0 ? (
-            <p className="text-gray-500 font-bold text-center mt-10">Le menu est en cours de mise à jour...</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {produits.map((p) => (
-                <div key={p.id} className="bg-white rounded-[30px] shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden border-4 border-orange-50 hover:border-yellow-400 group flex flex-col">
-                  <div className="h-60 bg-orange-100 relative overflow-hidden">
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.nom} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-6xl group-hover:scale-125 transition-transform duration-500">🍕</div>
-                    )}
-                    <div className="absolute top-4 right-4 bg-yellow-400 text-gray-900 font-black px-5 py-2 rounded-2xl shadow-xl text-lg rotate-3 group-hover:rotate-6 transition-transform border-2 border-white">
-                      {p.prix} DA
-                    </div>
-                  </div>
-                  <div className="p-6 flex-1 flex flex-col">
-                    <h3 className="text-3xl font-black text-gray-800 mb-2 uppercase italic tracking-tight">{p.nom}</h3>
-                    <p className="text-gray-500 text-sm flex-1 mb-6 font-medium">
-                      {p.description || "Recette maison préparée avec passion."}
-                    </p>
-                    <button 
-                      onClick={() => ajouterAuPanier(p)}
-                      className="w-full bg-[#0f4d22] hover:bg-[#1a6e34] text-white font-black py-4 rounded-2xl shadow-md hover:shadow-xl transition-all uppercase tracking-wider flex items-center justify-center gap-3 active:scale-95"
-                    >
-                      <span>Ajouter au panier</span>
-                      <span className="bg-white text-[#0f4d22] px-3 py-1 rounded-xl text-sm">+</span>
-                    </button>
-                  </div>
-                </div>
+            {/* Résumé des articles */}
+            <ul className="mb-6 space-y-2 border-b border-zinc-800 pb-4">
+              {panier.map((item, index) => (
+                <li key={index} className="flex justify-between text-gray-300">
+                  <span>🍔 {item.titre}</span>
+                  <span className="font-bold text-white">{item.prix} DA</span>
+                </li>
               ))}
-            </div>
-          )}
-        </div>
+              <li className="flex justify-between text-xl font-black text-red-500 pt-4 border-t border-zinc-800">
+                <span>TOTAL :</span>
+                <span>{totalPanier} DA</span>
+              </li>
+            </ul>
 
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-[40px] p-8 shadow-2xl border-8 border-yellow-400 sticky top-8">
-            <h2 className="text-3xl font-black text-gray-800 mb-6 flex items-center gap-3 uppercase italic tracking-tighter">
-               🛒 Mon Panier
-            </h2>
-            
-            {panier.length === 0 ? (
-              <div className="text-center py-12 bg-orange-50 rounded-3xl border-2 border-dashed border-orange-200">
-                <span className="text-5xl opacity-50 block mb-4">💨</span>
-                <p className="text-orange-800 font-black italic uppercase">Ton panier est vide</p>
-                <p className="text-sm text-orange-600/70 mt-2 font-bold">Ajoute un plat pour commencer !</p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="max-h-[30vh] overflow-y-auto pr-2 space-y-4 scrollbar-thin scrollbar-thumb-orange-200">
-                  {panier.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center bg-orange-50 p-4 rounded-2xl border-2 border-orange-100">
-                      <div className="flex-1">
-                        <p className="font-black text-gray-800 uppercase text-sm italic">{item.nom}</p>
-                        <p className="text-xs text-orange-500 font-black tracking-widest bg-orange-100 inline-block px-2 py-0.5 rounded-md mt-1">
-                          {item.quantite} x {item.prix} DA
-                        </p>
-                      </div>
-                      <p className="font-black text-gray-900 text-lg ml-4">{item.prix * item.quantite} DA</p>
-                    </div>
-                  ))}
-                </div>
-                
-                <div className="border-t-4 border-dashed border-gray-200 pt-6">
-                  <div className="flex justify-between items-center mb-6 bg-gray-50 p-4 rounded-2xl">
-                    <span className="text-gray-500 font-black uppercase tracking-widest text-sm">Total</span>
-                    <span className="text-4xl font-black text-orange-600 tracking-tighter italic">{totalPanier} DA</span>
-                  </div>
+            {/* Formulaire Client */}
+            <form onSubmit={validerCommande} className="space-y-4">
+              <input type="text" required placeholder="Votre Nom" value={nom} onChange={e => setNom(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-red-600 outline-none" />
+              
+              <input type="tel" required placeholder="Numéro de Téléphone" value={telephone} onChange={e => setTelephone(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-red-600 outline-none" />
+              
+              <textarea required placeholder="Adresse de livraison exacte" value={adresse} onChange={e => setAdresse(e.target.value)} rows={3}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-red-600 outline-none" />
 
-                  <div className="space-y-3 mt-6">
-                    <input 
-                      type="text" 
-                      placeholder="👤 NOM COMPLET *" 
-                      value={nomClient}
-                      onChange={(e) => setNomClient(e.target.value)}
-                      className="w-full p-4 bg-gray-50 border-4 border-transparent rounded-2xl focus:border-yellow-400 focus:bg-white focus:outline-none transition-all font-black placeholder:text-gray-400 text-gray-800"
-                    />
-                    <input 
-                      type="tel" 
-                      placeholder="📱 TÉLÉPHONE *" 
-                      value={telephone}
-                      onChange={(e) => setTelephone(e.target.value)}
-                      className="w-full p-4 bg-gray-50 border-4 border-transparent rounded-2xl focus:border-yellow-400 focus:bg-white focus:outline-none transition-all font-black placeholder:text-gray-400 text-gray-800"
-                    />
-                    <textarea 
-                      placeholder="📍 ADRESSE DE LIVRAISON *" 
-                      value={adresse}
-                      onChange={(e) => setAdresse(e.target.value)}
-                      className="w-full p-4 bg-gray-50 border-4 border-transparent rounded-2xl focus:border-yellow-400 focus:bg-white focus:outline-none transition-all font-black placeholder:text-gray-400 text-gray-800 h-24 resize-none"
-                    />
-                    {/* 💡 NOUVEAU : Le champ "Demande spéciale" */}
-                    <textarea 
-                      placeholder="✍️ DEMANDE SPÉCIALE (Sans oignons, supplément sauce...)" 
-                      value={notesClient}
-                      onChange={(e) => setNotesClient(e.target.value)}
-                      className="w-full p-4 bg-yellow-50 border-4 border-transparent rounded-2xl focus:border-yellow-400 focus:bg-white focus:outline-none transition-all font-black placeholder:text-yellow-700/50 text-gray-800 h-20 resize-none"
-                    />
-                  </div>
-
-                  <button 
-                    onClick={soumettreCommande}
-                    disabled={envoiEnCours}
-                    className={`w-full py-5 rounded-2xl font-black text-2xl mt-6 transition-all shadow-[0_10px_20px_rgba(250,204,21,0.4)] uppercase tracking-tighter italic flex justify-center items-center gap-2 ${
-                      envoiEnCours ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none' : 'bg-yellow-400 hover:bg-yellow-500 text-gray-900 hover:scale-105 active:scale-95'
-                    }`}
-                  >
-                    {envoiEnCours ? 'Envoi...' : '🚀 Commander !'}
-                  </button>
-                  <p className="text-center text-xs text-gray-400 mt-4 uppercase font-black tracking-widest">💸 Paiement à la livraison</p>
-                </div>
-              </div>
-            )}
+              <button type="submit" disabled={envoiEnCours}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg uppercase transition-colors"
+              >
+                {envoiEnCours ? "Envoi..." : "Confirmer la commande"}
+              </button>
+            </form>
           </div>
         </div>
-      </main>
+      )}
+
+      {/* --- PAGE PRINCIPALE (MENU) --- */}
+      <div className="flex flex-col items-center mb-12 mt-6">
+        <h1 className="text-4xl md:text-5xl font-extrabold text-center uppercase tracking-wider">
+          Menu <span className="text-red-600">Food Plus</span>
+        </h1>
+        <div className="h-1 w-24 bg-red-600 mt-4 rounded-full"></div>
+      </div>
+
+      {chargement ? (
+        <div className="text-center text-xl text-gray-400 mt-20 animate-pulse">Chargement du menu...</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
+          {produits.map((produit) => (
+            <div key={produit.id} className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-xl flex flex-col justify-between hover:border-red-600 transition-all duration-300">
+              
+              <div className="h-56 w-full relative bg-zinc-950">
+                {produit.image_url ? (
+                  <img src={produit.image_url} alt={produit.titre} className="object-cover w-full h-full" />
+                ) : (
+                  <div className="flex items-center justify-center w-full h-full text-zinc-700">Pas d'image</div>
+                )}
+              </div>
+
+              <div className="p-6 flex flex-col grow">
+                <h2 className="text-2xl font-bold mb-3 uppercase">{produit.titre}</h2>
+                <p className="text-gray-400 text-sm mb-6 grow">{produit.description}</p>
+                
+                <div className="flex justify-between items-center mt-auto pt-4 border-t border-zinc-800">
+                  <span className="text-3xl font-black text-red-500">{produit.prix} <span className="text-lg">DA</span></span>
+                  
+                  {/* C'est ICI que la magie opère : onClick={() => ajouterAuPanier(produit)} */}
+                  <button 
+                    onClick={() => ajouterAuPanier(produit)}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg uppercase"
+                  >
+                    Ajouter
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
