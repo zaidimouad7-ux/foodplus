@@ -8,22 +8,25 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// ⚠️ METS LE NOM EXACT DE TON BUCKET ICI (ATTENTION AUX MAJUSCULES !)
+// Si sur ton Supabase il s'appelle "produits", laisse comme ça. Si c'est "Produits", mets un P majuscule.
+const BUCKET_NAME = "produits"; 
+
 export default function AdminMenuPage() {
   // États pour le formulaire
   const [titre, setTitre] = useState("");
   const [description, setDescription] = useState("");
   const [prix, setPrix] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState(""); // Garde l'ancienne URL si modification
+  const [imageFile, setImageFile] = useState<File | null>(null); // Le fichier image sélectionné
   
   // États de gestion
   const [produits, setProduits] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
-  // Mode Édition : contient le produit si on modifie, ou null si on ajoute
   const [editingProduit, setEditingProduit] = useState<any | null>(null);
 
-  // Charger les produits au démarrage
   useEffect(() => {
     fetchProduits();
   }, []);
@@ -39,44 +42,70 @@ export default function AdminMenuPage() {
     }
   }
 
-  // Activer le mode édition pour un produit
   const chargerFormulairePourModification = (produit: any) => {
     setEditingProduit(produit);
     setTitre(produit.titre || produit.nom || "");
     setDescription(produit.description || "");
     setPrix(produit.prix?.toString() || "");
     setImageUrl(produit.image_url || "");
+    setImageFile(null); 
     setMessage(null);
-    window.scrollTo({ top: 0, behavior: "smooth" }); // Remonte au formulaire
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Annuler la modification et repasser en mode ajout
   const annulerModification = () => {
     setEditingProduit(null);
     setTitre("");
     setDescription("");
     setPrix("");
     setImageUrl("");
+    setImageFile(null);
     setMessage(null);
   };
 
-  // Soumission du formulaire (Ajout OU Modification)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setUploading(true);
     setMessage(null);
 
     try {
+      let finalImageUrl = imageUrl;
+
+      // --- LOGIQUE D'UPLOAD DE L'IMAGE ---
+      if (imageFile) {
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+
+        // Envoi de l'image dans le bucket dynamique
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(BUCKET_NAME) 
+          .upload(fileName, imageFile, {
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          throw new Error(`Le bucket "${BUCKET_NAME}" n'a pas été trouvé ou est inaccessible. Vérifie son nom exact sur Supabase !`);
+        }
+
+        // Récupération du lien public
+        const { data: publicUrlData } = supabase.storage
+          .from(BUCKET_NAME)
+          .getPublicUrl(fileName);
+
+        finalImageUrl = publicUrlData.publicUrl;
+      }
+
+      // --- ENREGISTREMENT DANS LA BASE DE DONNÉES ---
       const donneesProduit = {
-        nom: titre, // Sécurité pour la contrainte NOT NULL
+        nom: titre, 
         titre: titre,
         description: description,
         prix: parseFloat(prix),
-        image_url: imageUrl,
+        image_url: finalImageUrl,
       };
 
       if (editingProduit) {
-        // --- MODE ENREGISTRER LA MODIFICATION ---
         const { error } = await supabase
           .from("produits")
           .update(donneesProduit)
@@ -85,7 +114,6 @@ export default function AdminMenuPage() {
         if (error) throw error;
         setMessage({ type: "success", text: "🔄 Produit mis à jour avec succès !" });
       } else {
-        // --- MODE AJOUTER NOUVEAU PRODUIT ---
         const { error } = await supabase
           .from("produits")
           .insert([donneesProduit]);
@@ -94,34 +122,27 @@ export default function AdminMenuPage() {
         setMessage({ type: "success", text: "✅ Nouveau produit ajouté au menu !" });
       }
 
-      // Réinitialiser le formulaire et recharger la liste
       annulerModification();
       fetchProduits();
 
     } catch (error: any) {
       const detailsErreur = error?.message || JSON.stringify(error, null, 2);
       console.error("Erreur complète:", detailsErreur);
-      setMessage({ type: "error", text: "❌ Erreur : " + detailsErreur });
+      setMessage({ type: "error", text: "❌ " + detailsErreur });
     } finally {
       setUploading(false);
     }
   };
 
-  // --- FONCTION SUPPRIMER UN PRODUIT ---
   const handleSupprimer = async (id: number, nomProduit: string) => {
     const confirmer = window.confirm(`Êtes-vous sûr de vouloir supprimer "${nomProduit}" du menu ?`);
     if (!confirmer) return;
 
     try {
-      const { error } = await supabase
-        .from("produits")
-        .delete()
-        .eq("id", id);
-
+      const { error } = await supabase.from("produits").delete().eq("id", id);
       if (error) throw error;
-
       setMessage({ type: "success", text: "🗑️ Produit supprimé du menu." });
-      fetchProduits(); // Recharger la liste
+      fetchProduits();
     } catch (error: any) {
       alert("Erreur lors de la suppression : " + error.message);
     }
@@ -140,7 +161,7 @@ export default function AdminMenuPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* COLONNE 1 : FORMULAIRE (AJOUT / MODIFICATION) */}
+          {/* FORMULAIRE */}
           <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl h-fit sticky top-6">
             <h2 className="text-2xl font-bold mb-6 text-red-500 uppercase tracking-wider">
               {editingProduit ? "🔄 Modifier le produit" : "✨ Ajouter un produit"}
@@ -169,35 +190,42 @@ export default function AdminMenuPage() {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">Description / Ingrédients</label>
-                <textarea rows={3} placeholder="Ex: Pain brioché, 2x steaks, cheddar..." value={description} onChange={(e) => setDescription(e.target.value)}
+                <textarea rows={3} placeholder="Ex: Pain brioché, 2x steaks..." value={description} onChange={(e) => setDescription(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-red-600 outline-none" />
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">Lien de l'image (URL Storage)</label>
-                <input type="text" placeholder="https://..." value={imageUrl} onChange={(e) => setImageUrl(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-red-600 outline-none" />
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">Image du produit</label>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-white text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-600 file:text-white hover:file:bg-red-700 cursor-pointer outline-none" 
+                />
+                {editingProduit && imageUrl && !imageFile && (
+                  <div className="mt-2 text-xs text-gray-500">Image actuelle conservée. Sélectionnez un nouveau fichier pour la changer.</div>
+                )}
               </div>
 
               <div className="pt-2 space-y-2">
                 <button type="submit" disabled={uploading}
                   className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg uppercase tracking-wide transition-colors text-sm"
                 >
-                  {uploading ? "Traitement..." : editingProduit ? "💾 Enregistrer les modifications" : "➕ Ajouter au menu"}
+                  {uploading ? "Traitement et Upload..." : editingProduit ? "💾 Enregistrer" : "➕ Ajouter au menu"}
                 </button>
 
                 {editingProduit && (
                   <button type="button" onClick={annulerModification}
                     className="w-full bg-zinc-800 hover:bg-zinc-700 text-gray-300 font-bold py-2 rounded-lg uppercase tracking-wide transition-colors text-xs"
                   >
-                    ❌ Annuler la modification
+                    ❌ Annuler
                   </button>
                 )}
               </div>
             </form>
           </div>
 
-          {/* COLONNE 2 & 3 : LISTE DES PRODUITS EXISTANTS */}
+          {/* LISTE DES PRODUITS */}
           <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl">
             <h2 className="text-2xl font-bold mb-6 uppercase tracking-wider text-gray-300">
               📋 Produits au menu ({produits.length})
@@ -210,7 +238,6 @@ export default function AdminMenuPage() {
                 produits.map((produit) => (
                   <div key={produit.id} className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-zinc-700 transition-colors">
                     
-                    {/* Infos produit */}
                     <div className="flex items-center gap-4">
                       {produit.image_url && (
                         <img src={produit.image_url} alt={produit.titre} className="w-16 h-16 object-cover rounded-lg bg-zinc-900 border border-zinc-800 shrink-0" />
@@ -222,18 +249,11 @@ export default function AdminMenuPage() {
                       </div>
                     </div>
 
-                    {/* Actions */}
                     <div className="flex gap-2 w-full sm:w-auto justify-end">
-                      <button 
-                        onClick={() => chargerFormulairePourModification(produit)}
-                        className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold py-2 px-4 rounded-lg transition-colors uppercase"
-                      >
+                      <button onClick={() => chargerFormulairePourModification(produit)} className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold py-2 px-4 rounded-lg transition-colors uppercase">
                         ✏️ Modifier
                       </button>
-                      <button 
-                        onClick={() => handleSupprimer(produit.id, produit.titre || produit.nom)}
-                        className="bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white text-xs font-bold py-2 px-4 rounded-lg transition-colors uppercase border border-red-600/20"
-                      >
+                      <button onClick={() => handleSupprimer(produit.id, produit.titre || produit.nom)} className="bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white text-xs font-bold py-2 px-4 rounded-lg transition-colors uppercase border border-red-600/20">
                         🗑️ Supprimer
                       </button>
                     </div>
