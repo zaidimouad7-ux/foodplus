@@ -63,7 +63,12 @@ export default function AdminDashboard() {
           { event: 'INSERT', schema: 'public', table: 'commandes' },
           (payload) => {
             fetchCommandes();
-        
+        try {
+              const audio = new Audio('/notif.mp3');
+              audio.play().catch((e) => console.log("Son bloqué par le navigateur en attente de clic"));
+            } catch (e) {
+              console.log("Impossible de jouer le son");
+            }
             setTimeout(() => {
               alert(`🚨 DING DING ! NOUVELLE COMMANDE !\n\n👨 Client : ${payload.new.nom_client}\n💰 Total : ${payload.new.total} DA\n\nVérifiez votre tableau de bord !`);
             }, 500);
