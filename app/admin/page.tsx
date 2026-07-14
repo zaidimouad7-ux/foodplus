@@ -55,6 +55,25 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (estAdminAuthentifie) {
       fetchCommandes(); fetchCategories(); fetchProduits(); fetchLivreurs();
+
+      const channel = supabase
+        .channel('custom-insert-channel')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'commandes' },
+          (payload) => {
+            fetchCommandes();
+        
+            setTimeout(() => {
+              alert(`🚨 DING DING ! NOUVELLE COMMANDE !\n\n👨 Client : ${payload.new.nom_client}\n💰 Total : ${payload.new.total} DA\n\nVérifiez votre tableau de bord !`);
+            }, 500);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
   }, [estAdminAuthentifie]);
 
@@ -200,6 +219,19 @@ export default function AdminDashboard() {
     );
   }
 
+  // --- FONCTION POUR FORMATER LA DATE ET L'HEURE ---
+  const formaterDate = (dateString: string) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit'
+    }) + ' à ' + date.toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   return (
     <div className="min-h-screen bg-black text-white p-6 font-sans">
       <div className="max-w-6xl mx-auto">
@@ -216,7 +248,7 @@ export default function AdminDashboard() {
           <button onClick={() => setOngletActif("livreurs")} className={`py-3 px-5 rounded-xl font-bold uppercase tracking-wider transition-all text-xs md:text-sm ${ongletActif === "livreurs" ? "bg-red-600 text-white shadow-lg" : "bg-zinc-900 text-gray-400 border border-zinc-800"}`}>Livreurs ({livreurs.length})</button>
         </div>
 
-        {/* ONTLET 1 : COMMANDES (MODIFIÉ POUR METTRE EN VALEUR LA NOTE DU CLIENT) */}
+        {/* ONGLET COMMANDES (AVEC AFFICHAGE DE LA DATE ET HEURE) */}
         {ongletActif === "commandes" && (
            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl">
              <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold uppercase tracking-wider text-gray-300">Suivi des commandes</h2><button onClick={fetchCommandes} className="bg-zinc-800 hover:bg-zinc-700 text-xs font-bold py-2 px-4 rounded-lg uppercase">🔄 Rafraîchir</button></div>
@@ -229,13 +261,20 @@ export default function AdminDashboard() {
                        <div className="space-y-1 grow w-full md:w-auto">
                          <div className="flex flex-wrap items-center gap-3">
                            <span className="text-sm bg-zinc-800 text-white px-2 py-1 rounded font-mono font-bold">#{cmd.id}</span>
-                           <h3 className="font-bold text-lg text-white">{cmd.nom_client}</h3>
+                           
+                           {/* NOUVEAU : AFFICHAGE DE L'HEURE (ex: 14/07 à 19:04) */}
+                           {cmd.created_at && (
+                             <span className="text-xs text-gray-400 bg-zinc-900 border border-zinc-800 px-2 py-1 rounded-md font-mono flex items-center gap-1">
+                               ⏱️ {formaterDate(cmd.created_at)}
+                             </span>
+                           )}
+
+                           <h3 className="font-bold text-lg text-white ml-1">{cmd.nom_client}</h3>
                            <span className={`text-xs uppercase font-extrabold px-2 py-1 rounded ${cmd.statut === "en attente" ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : cmd.statut === "en cours" ? "bg-blue-500/10 text-blue-500 border border-blue-500/20" : cmd.statut === "en route" ? "bg-purple-500/10 text-purple-500 border border-purple-500/20" : "bg-green-500/10 text-green-500 border border-green-500/20"}`}>{cmd.statut === "en route" && livreurAttribue ? `En route (${livreurAttribue.nom})` : cmd.statut}</span>
                          </div>
-                         <p className="text-sm text-red-500 font-bold">📞 {cmd.telephone_client || cmd.telephone}</p>
+                         <p className="text-sm text-red-500 font-bold mt-1">📞 {cmd.telephone_client || cmd.telephone}</p>
                          <p className="text-sm text-gray-400">📍 {cmd.adresse_livraison || cmd.adresse}</p>
                          
-                         {/* L'AFFICHAGE GÈRE PARFAITEMENT LA REMARQUE / NOTE DU CLIENT SANS SOUCI */}
                          <div className="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50 mt-2">
                            <p className="text-xs text-gray-500 uppercase font-bold mb-1">Détails de la commande :</p>
                            <p className="text-sm text-gray-300 font-medium whitespace-pre-wrap">{cmd.details_commande}</p>
@@ -266,7 +305,7 @@ export default function AdminDashboard() {
            </div>
         )}
 
-        {/* ONTLET 2 : CATEGORIES */}
+        {/* ONGLET CATEGORIES */}
         {ongletActif === "categories" && (
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
              <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl h-fit">
@@ -291,7 +330,7 @@ export default function AdminDashboard() {
            </div>
         )}
 
-        {/* ONTLET 3 : MENU */}
+        {/* ONGLET MENU */}
         {ongletActif === "menu" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl h-fit lg:sticky lg:top-6">
@@ -306,7 +345,7 @@ export default function AdminDashboard() {
                 </div>
                 <div><label className="block text-xs font-bold uppercase text-gray-400 mb-2">Prix de base (DA)</label><input type="number" required value={prix} onChange={(e) => setPrix(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white outline-none" /></div>
                 
-                {/* 1. TYPES (VARIANTES) - Choix Unique */}
+                {/* 1. TYPES */}
                 <div className="bg-black/40 border border-zinc-800 p-4 rounded-xl">
                   <label className="block text-xs font-bold uppercase text-blue-500 mb-1">🏷️ Les Types (Choix Unique)</label>
                   <p className="text-[10px] text-gray-500 mb-3">Ex: Chocolat Blanc (0 DA), Nutella (+50 DA)... Le client DOIT en choisir un.</p>
@@ -320,7 +359,7 @@ export default function AdminDashboard() {
                   ))}
                 </div>
 
-                {/* 2. EXTRAS (SUPPLEMENTS) - Choix Multiple */}
+                {/* 2. EXTRAS */}
                 <div className="bg-black/40 border border-zinc-800 p-4 rounded-xl">
                   <label className="block text-xs font-bold uppercase text-amber-500 mb-1">➕ Les Extras (Choix Multiples)</label>
                   <p className="text-[10px] text-gray-500 mb-3">Ex: Fraise (+100 DA), Banane (+100 DA)... Le client peut en cocher plusieurs.</p>
@@ -372,7 +411,7 @@ export default function AdminDashboard() {
           </div>
         )}
         
-        {/* ONTLET 4 : LIVREURS */}
+        {/* ONGLET LIVREURS */}
         {ongletActif === "livreurs" && (
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
              <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl h-fit">

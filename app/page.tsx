@@ -23,7 +23,7 @@ export default function ClientPage() {
   const [nomClient, setNomClient] = useState("");
   const [telephone, setTelephone] = useState("");
   const [adresse, setAdresse] = useState("");
-  const [noteClient, setNoteClient] = useState(""); // NOUVEAU : État pour stocker la note
+  const [noteClient, setNoteClient] = useState("");
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
   const [commandeValidee, setCommandeValidee] = useState(false);
   const [numeroCommande, setNumeroCommande] = useState<number | null>(null);
@@ -60,16 +60,18 @@ export default function ClientPage() {
   const ajouterAuPanierDirect = () => {
     const prixVariante = varianteChoisie ? varianteChoisie.prix : 0;
     const prixSupps = supplementsCoches.reduce((total, s) => total + s.prix, 0);
-    const prixTotalItem = produitOuvert.prix + prixVariante + prixSupps;
+    const prixTotalUnitaire = produitOuvert.prix + prixVariante + prixSupps;
 
     const newItem = {
       idUnique: Math.random().toString(36).substring(7),
       produit_id: produitOuvert.id,
       nom: produitOuvert.titre || produitOuvert.nom,
       prixBase: produitOuvert.prix,
-      prixTotal: prixTotalItem,
+      prixUnitaire: prixTotalUnitaire, // <-- Prix pour 1 seul article
+      prixTotal: prixTotalUnitaire,    // <-- Prix Total (quantité x unitaire)
       variante: varianteChoisie,
-      supplements: supplementsCoches
+      supplements: supplementsCoches,
+      quantite: 1                      // <-- Nouvelle propriété : Quantité
     };
 
     setPanier([...panier, newItem]);
@@ -81,7 +83,25 @@ export default function ClientPage() {
     if (panier.length === 1) setPanierOuvert(false);
   };
 
+  // --- NOUVELLE FONCTION : CHANGER LA QUANTITÉ ---
+  const modifierQuantite = (idUnique: string, changement: number) => {
+    setPanier(panier.map(item => {
+      if (item.idUnique === idUnique) {
+        const nouvelleQuantite = item.quantite + changement;
+        // On empêche de descendre en dessous de 1 (on utilise la poubelle pour supprimer)
+        if (nouvelleQuantite < 1) return item;
+        return { 
+          ...item, 
+          quantite: nouvelleQuantite, 
+          prixTotal: item.prixUnitaire * nouvelleQuantite 
+        };
+      }
+      return item;
+    }));
+  };
+
   const totalPanier = panier.reduce((total, item) => total + item.prixTotal, 0);
+  const nombreArticles = panier.reduce((total, item) => total + (item.quantite || 1), 0); // Compte total des quantités
 
   const handleCommander = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,7 +109,8 @@ export default function ClientPage() {
     setEnvoiEnCours(true);
 
     let details = panier.map(item => {
-      let desc = `- ${item.nom}`;
+      // Affichage de la quantité dans le résumé envoyé à l'admin (Ex: "- 2x Tacos")
+      let desc = `- ${item.quantite}x ${item.nom}`;
       if (item.variante) desc += ` [Type: ${item.variante.nom}]`;
       if (item.supplements && item.supplements.length > 0) {
         desc += ` (Extras: ${item.supplements.map((s:any) => s.nom).join(', ')})`;
@@ -97,7 +118,6 @@ export default function ClientPage() {
       return desc;
     }).join('\n');
 
-    // NOUVEAU : Si le client a écrit une note, on l'ajoute proprement aux détails transmis
     if (noteClient.trim()) {
       details += `\n\n📝 NOTE CLIENT :\n${noteClient.trim()}`;
     }
@@ -125,7 +145,7 @@ export default function ClientPage() {
           </div>
         </div>
         
-        <a href="tel:0556458402" className="flex items-center gap-2 group active:scale-95 transition-all shrink-0">
+        <a href="tel:0553940214" className="flex items-center gap-2 group active:scale-95 transition-all shrink-0">
           <span className="text-red-500 font-bold text-[10px] sm:text-xs uppercase tracking-widest text-right leading-tight">
             Réclamation
           </span>
@@ -231,7 +251,8 @@ export default function ClientPage() {
       {/* BOUTON FLOTTANT PANIER */}
       {panier.length > 0 && !panierOuvert && !produitOuvert && (
         <button onClick={() => setPanierOuvert(true)} className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-md bg-green-600 text-white font-black py-5 px-6 rounded-2xl shadow-2xl shadow-green-600/30 flex justify-between items-center z-40 active:scale-[0.98] transition-transform uppercase tracking-wider text-sm">
-          <span className="bg-white text-green-600 w-8 h-8 flex items-center justify-center rounded-full">{panier.length}</span>
+          {/* On affiche le nombre TOTAL d'articles (pas juste le nombre de lignes) */}
+          <span className="bg-white text-green-600 w-8 h-8 flex items-center justify-center rounded-full">{nombreArticles}</span>
           <span>Voir mon panier</span>
           <span>{totalPanier} DA</span>
         </button>
@@ -243,7 +264,7 @@ export default function ClientPage() {
           <div className="bg-zinc-900 w-full max-w-md border-t sm:border border-zinc-800 rounded-t-4xl sm:rounded-3xl overflow-hidden shadow-2xl max-h-[95vh] flex flex-col">
             <div className="p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-950 shrink-0">
               <h2 className="text-xl font-bold uppercase tracking-wider text-white">🛍️ Mon Panier</h2>
-              <button onClick={() => setPanierOuvert(false)} className="text-gray-400 bg-zinc-900 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
+              <button onClick={() => setPanierOuvert(false)} className="text-gray-400 bg-zinc-900 w-10 h-10 rounded-full flex items-center justify-center hover:bg-zinc-800">✕</button>
             </div>
 
             {commandeValidee ? (
@@ -261,14 +282,36 @@ export default function ClientPage() {
               <div className="p-6 overflow-y-auto flex-1">
                 <div className="space-y-4 mb-8">
                   {panier.map((item) => (
-                    <div key={item.idUnique} className="flex justify-between items-center bg-zinc-950 border border-zinc-800 p-4 rounded-2xl">
-                      <div className="flex-1">
-                        <h4 className="font-bold text-white text-lg">{item.nom}</h4>
-                        {item.variante && <p className="text-xs text-blue-400 mt-1 font-bold">Type : {item.variante.nom}</p>}
-                        {item.supplements && item.supplements.length > 0 && <p className="text-xs text-gray-500 mt-1">Extras : {item.supplements.map((s:any) => s.nom).join(', ')}</p>}
-                        <p className="text-red-500 font-black mt-2">{item.prixTotal} DA</p>
+                    <div key={item.idUnique} className="flex flex-col bg-zinc-950 border border-zinc-800 p-4 rounded-2xl">
+                      
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex-1">
+                          <h4 className="font-bold text-white text-lg">{item.nom}</h4>
+                          {item.variante && <p className="text-xs text-blue-400 mt-1 font-bold">Type : {item.variante.nom}</p>}
+                          {item.supplements && item.supplements.length > 0 && <p className="text-xs text-gray-500 mt-1">Extras : {item.supplements.map((s:any) => s.nom).join(', ')}</p>}
+                        </div>
+                        <button onClick={() => retirerDuPanier(item.idUnique)} className="text-gray-500 bg-zinc-900 p-2.5 rounded-xl ml-4 hover:bg-red-500/10 hover:text-red-500 transition-colors">🗑️</button>
                       </div>
-                      <button onClick={() => retirerDuPanier(item.idUnique)} className="text-red-500 bg-red-500/10 p-3 rounded-xl ml-4">🗑️</button>
+
+                      {/* LIGNE QUANTITÉ ET PRIX */}
+                      <div className="flex items-center justify-between border-t border-zinc-800/60 pt-3">
+                        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl p-1 shadow-inner">
+                          <button 
+                            type="button" 
+                            onClick={() => modifierQuantite(item.idUnique, -1)} 
+                            disabled={item.quantite <= 1}
+                            className="w-8 h-8 flex items-center justify-center text-white font-black bg-zinc-800 rounded-lg active:scale-95 disabled:opacity-30 transition-all"
+                          >-</button>
+                          <span className="font-black text-white w-8 text-center">{item.quantite}</span>
+                          <button 
+                            type="button" 
+                            onClick={() => modifierQuantite(item.idUnique, 1)} 
+                            className="w-8 h-8 flex items-center justify-center text-white font-black bg-zinc-800 rounded-lg active:scale-95 transition-all"
+                          >+</button>
+                        </div>
+                        <p className="text-red-500 font-black text-lg">{item.prixTotal} DA</p>
+                      </div>
+
                     </div>
                   ))}
                 </div>
@@ -284,11 +327,10 @@ export default function ClientPage() {
                   <input type="tel" required placeholder="N° Téléphone" value={telephone} onChange={(e) => setTelephone(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-red-600" />
                   <textarea required rows={2} placeholder="Adresse complète..." value={adresse} onChange={(e) => setAdresse(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-red-600" />
                   
-                  {/* NOUVEAU : ZONE DE TEXTE POUR LA NOTE CLIENT */}
                   <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mt-6 mb-4 border-b border-zinc-800 pb-2">Remarque sur la commande (Optionnel)</h3>
                   <textarea rows={2} placeholder="Ex: Pas d'oignon, sauce piquante, livraison à l'étage..." value={noteClient} onChange={(e) => setNoteClient(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-red-600 font-medium text-sm" />
 
-                  <button type="submit" disabled={envoiEnCours} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl uppercase text-sm mt-6 shadow-xl">
+                  <button type="submit" disabled={envoiEnCours} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl uppercase text-sm mt-6 shadow-xl active:scale-[0.98] transition-transform">
                     {envoiEnCours ? "Transmission..." : "🚀 Confirmer la commande"}
                   </button>
                 </form>
